@@ -14,7 +14,8 @@ import {
   LayoutDashboard, FileText, Users, LogOut, Search, Download, 
   Plus, ShieldAlert, ShieldCheck, BarChart3, Clock, GraduationCap,
   AlertCircle, CheckCircle2, XCircle, Loader2, Filter, Settings, Eye, EyeOff, Trash2,
-  CheckCircle, Save, Upload, Cloud, Link, ExternalLink, User, Share2, Send, Menu, X
+  CheckCircle, Save, Upload, Cloud, Link, ExternalLink, User, Share2, Send, Menu, X,
+  Mail, UserPlus
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -2028,15 +2029,14 @@ function ProfileView({ user, setAppError, setToast }: { user: UserProfile, setAp
 function UsersView({ currentUser, onShareStudent }: { currentUser: UserProfile, onShareStudent: (student: UserProfile) => void }) {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState<'all' | 'student' | 'admin'>('all');
   const [error, setError] = useState<Error | null>(null);
 
   if (error) throw error;
 
   useEffect(() => {
     if (currentUser.role !== 'admin') return;
-    // Fetch all users to allow managing both students and admins
-    const q = query(collection(db, 'users'));
+    // Only fetch students for the "Students" view
+    const q = query(collection(db, 'users'), where('role', '==', 'student'));
     const unsub = onSnapshot(q, (snapshot) => {
       setUsers(snapshot.docs.map(d => d.data() as UserProfile));
     }, (err) => {
@@ -2046,10 +2046,6 @@ function UsersView({ currentUser, onShareStudent }: { currentUser: UserProfile, 
   }, [currentUser.role]);
 
   const toggleBlock = async (user: UserProfile) => {
-    if (user.uid === currentUser.uid) {
-      alert("You cannot block your own account.");
-      return;
-    }
     try {
       await updateDoc(doc(db, 'users', user.uid), {
         isBlocked: !user.isBlocked
@@ -2062,8 +2058,7 @@ function UsersView({ currentUser, onShareStudent }: { currentUser: UserProfile, 
   const filteredUsers = users.filter(u => {
     const matchesSearch = u.email.toLowerCase().includes(search.toLowerCase()) || 
                          (u.name && u.name.toLowerCase().includes(search.toLowerCase()));
-    const matchesRole = roleFilter === 'all' || u.role === roleFilter;
-    return matchesSearch && matchesRole;
+    return matchesSearch;
   });
 
   return (
@@ -2073,28 +2068,11 @@ function UsersView({ currentUser, onShareStudent }: { currentUser: UserProfile, 
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
           <input
             type="text"
-            placeholder="Search users by name or email..."
+            placeholder="Search students by name or email..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
           />
-        </div>
-        
-        <div className="flex bg-stone-100 p-1 rounded-xl">
-          {(['all', 'student', 'admin'] as const).map((role) => (
-            <button
-              key={role}
-              onClick={() => setRoleFilter(role)}
-              className={cn(
-                "px-4 py-1.5 text-xs font-medium rounded-lg capitalize transition-all",
-                roleFilter === role 
-                  ? "bg-white text-stone-900 shadow-sm" 
-                  : "text-stone-500 hover:text-stone-700"
-              )}
-            >
-              {role}s
-            </button>
-          ))}
         </div>
       </div>
 
@@ -2125,16 +2103,13 @@ function UsersView({ currentUser, onShareStudent }: { currentUser: UserProfile, 
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className={cn(
-                      "inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider",
-                      u.role === 'admin' ? "bg-purple-50 text-purple-600" : "bg-blue-50 text-blue-600"
-                    )}>
-                      {u.role}
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider bg-blue-50 text-blue-600">
+                      Student
                     </span>
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-sm text-stone-500">
-                      {u.role === 'student' ? (u.program || 'No program') : 'N/A'}
+                      {u.program || 'No program'}
                     </span>
                   </td>
                   <td className="px-6 py-4">
@@ -2150,15 +2125,13 @@ function UsersView({ currentUser, onShareStudent }: { currentUser: UserProfile, 
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-3">
-                      {u.role === 'student' && (
-                        <button
-                          onClick={() => onShareStudent(u)}
-                          className="p-2 text-stone-400 hover:text-blue-600 transition-colors"
-                          title="Give Document"
-                        >
-                          <Send className="w-4 h-4" />
-                        </button>
-                      )}
+                      <button
+                        onClick={() => onShareStudent(u)}
+                        className="p-2 text-stone-400 hover:text-blue-600 transition-colors"
+                        title="Give Document"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
                       {u.uid !== currentUser.uid && (
                         <button
                           onClick={() => toggleBlock(u)}
@@ -2184,16 +2157,28 @@ function UsersView({ currentUser, onShareStudent }: { currentUser: UserProfile, 
 
 function SettingsView({ user, setAppError }: { user: UserProfile, setAppError: (err: Error) => void }) {
   const [preAuthAdmins, setPreAuthAdmins] = useState<PreAuthorizedAdmin[]>([]);
+  const [activeAdmins, setActiveAdmins] = useState<UserProfile[]>([]);
   const [newEmail, setNewEmail] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'preAuthorizedAdmins'), (snapshot) => {
+    const unsubPreAuth = onSnapshot(collection(db, 'preAuthorizedAdmins'), (snapshot) => {
       setPreAuthAdmins(snapshot.docs.map(d => d.data() as PreAuthorizedAdmin));
     }, (error) => {
       setAppError(error);
     });
-    return () => unsub();
+
+    const qActive = query(collection(db, 'users'), where('role', '==', 'admin'));
+    const unsubActive = onSnapshot(qActive, (snapshot) => {
+      setActiveAdmins(snapshot.docs.map(d => d.data() as UserProfile));
+    }, (error) => {
+      setAppError(error);
+    });
+
+    return () => {
+      unsubPreAuth();
+      unsubActive();
+    };
   }, []);
 
   const handleAdd = async (e: React.FormEvent) => {
@@ -2229,15 +2214,92 @@ function SettingsView({ user, setAppError }: { user: UserProfile, setAppError: (
     }
   };
 
+  const toggleBlock = async (admin: UserProfile) => {
+    if (admin.uid === user.uid) {
+      alert("You cannot block your own account.");
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'users', admin.uid), {
+        isBlocked: !admin.isBlocked
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   return (
     <div className="max-w-4xl space-y-8">
+      {/* Active Admins Section */}
       <div className="bg-white p-8 rounded-2xl border border-black/5 shadow-sm">
-        <h3 className="text-xl font-bold text-stone-900 mb-2">Admin Pre-authorization</h3>
-        <p className="text-stone-500 mb-8">Add emails of staff members who should be granted Admin privileges upon their first login.</p>
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+            <ShieldCheck className="w-5 h-5 text-emerald-600" />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-stone-900">Active Administrators</h3>
+            <p className="text-sm text-stone-500">Manage existing administrators and their access status.</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="divide-y divide-stone-50 border border-stone-50 rounded-xl overflow-hidden">
+            {activeAdmins.map(admin => (
+              <div key={admin.uid} className="flex items-center justify-between p-4 bg-white hover:bg-stone-50 transition-colors">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-stone-100 rounded-full flex items-center justify-center text-stone-600 font-bold overflow-hidden">
+                    {admin.photoURL ? (
+                      <img src={admin.photoURL} alt={admin.displayName || admin.email} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      (admin.displayName || admin.email)[0].toUpperCase()
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-stone-900">{admin.displayName || admin.email}</p>
+                    <p className="text-xs text-stone-400">{admin.email}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {admin.uid !== user.uid && (
+                    <button
+                      onClick={() => toggleBlock(admin)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                        admin.isBlocked
+                          ? "bg-red-50 text-red-600 hover:bg-red-100"
+                          : "bg-stone-50 text-stone-600 hover:bg-stone-100"
+                      )}
+                    >
+                      {admin.isBlocked ? "Unblock" : "Block"}
+                    </button>
+                  )}
+                  {admin.isBlocked && (
+                    <span className="px-2 py-1 bg-red-100 text-red-700 text-[10px] font-bold uppercase rounded tracking-wider">
+                      Blocked
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Pre-authorization Section */}
+      <div className="bg-white p-8 rounded-2xl border border-black/5 shadow-sm">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+            <UserPlus className="w-5 h-5 text-blue-600" />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-stone-900">Admin Pre-authorization</h3>
+            <p className="text-sm text-stone-500">Add emails of staff members who should be granted Admin privileges upon their first login.</p>
+          </div>
+        </div>
 
         <form onSubmit={handleAdd} className="flex flex-col sm:flex-row gap-4 mb-8">
           <div className="flex-1 relative">
-            <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
+            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
             <input
               type="email"
               placeholder="Enter @neu.edu.ph email"
