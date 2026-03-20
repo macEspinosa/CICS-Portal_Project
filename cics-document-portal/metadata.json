@@ -1,0 +1,5 @@
+{
+  "name": "CICS Document Portal",
+  "description": "A secure portal for CICS students to access academic documents and for admins to manage resources.",
+  "requestFramePermissions": []
+}

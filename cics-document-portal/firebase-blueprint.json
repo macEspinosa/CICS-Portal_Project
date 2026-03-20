@@ -1,0 +1,94 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Represents a student or admin in the system.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "description": "Student or Admin email" },
+        "role": { "type": "string", "enum": ["admin", "student"], "description": "User role" },
+        "program": { "type": "string", "description": "Undergraduate program (for students)" },
+        "isBlocked": { "type": "boolean", "description": "Whether the student is blocked from the app" },
+        "lastLogin": { "type": "string", "format": "date-time", "description": "Last login timestamp" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Document": {
+      "title": "Document",
+      "description": "A document uploaded by CICS admins.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "url": { "type": "string", "description": "URL to the document file" },
+        "uploadedBy": { "type": "string", "description": "UID of the admin who uploaded it" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "downloadCount": { "type": "number" }
+      },
+      "required": ["id", "title", "url", "uploadedBy", "createdAt"]
+    },
+    "Log": {
+      "title": "Log",
+      "description": "Activity logs for analytics.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "action": { "type": "string", "enum": ["login", "download"] },
+        "documentId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "action", "timestamp"]
+    },
+    "PreAuthorizedAdmin": {
+      "title": "PreAuthorizedAdmin",
+      "description": "Emails pre-authorized to be admins.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "addedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "addedBy", "createdAt"]
+    },
+    "SharedDocument": {
+      "title": "SharedDocument",
+      "description": "A document shared with a specific student.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "documentId": { "type": "string" },
+        "studentEmail": { "type": "string" },
+        "sharedBy": { "type": "string" },
+        "sharedAt": { "type": "string", "format": "date-time" },
+        "title": { "type": "string" },
+        "url": { "type": "string" }
+      },
+      "required": ["id", "documentId", "studentEmail", "sharedBy", "sharedAt", "title", "url"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/documents/{docId}": {
+      "schema": "Document",
+      "description": "CICS documents"
+    },
+    "/logs/{logId}": {
+      "schema": "Log",
+      "description": "Activity logs"
+    },
+    "/preAuthorizedAdmins/{email}": {
+      "schema": "PreAuthorizedAdmin",
+      "description": "Pre-authorized admin emails"
+    },
+    "/shared_documents/{sharedId}": {
+      "schema": "SharedDocument",
+      "description": "Documents shared with specific students"
+    }
+  }
+}

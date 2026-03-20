@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (
+          request.auth.token.email == "mariaantonette.espinosa@neu.edu.ph" ||
+          exists(/databases/$(database)/documents/preAuthorizedAdmins/$(request.auth.token.email)) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isBlocked', false) == false)
+        );
+    }
+
+    function isStudent() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'student' &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isBlocked', false) == false;
+    }
+
+    // Validation Functions
+    function isValidSharedDocument(data) {
+      return data.documentId is string && data.documentId.size() < 100 &&
+             data.studentEmail is string && data.studentEmail.size() < 100 &&
+             data.sharedBy == request.auth.uid &&
+             data.sharedAt is string &&
+             data.title is string && data.title.size() < 200 &&
+             data.url is string && data.url.size() < 1000 &&
+             (data.get('downloadUrl', null) == null || (data.downloadUrl is string && data.downloadUrl.size() < 1000));
+    }
+
+    // User Rules
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow create: if isAuthenticated() && isOwner(userId);
+      allow update: if isAuthenticated() && (isOwner(userId) || isAdmin());
+    }
+
+    // Document Rules
+    match /documents/{docId} {
+      allow read: if isAuthenticated() && (isAdmin() || isStudent());
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isStudent() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['downloadCount']));
+    }
+
+    // Log Rules
+    match /logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+    }
+
+    // Pre-authorized Admin Rules
+    match /preAuthorizedAdmins/{email} {
+      allow read, write: if isAdmin();
+    }
+
+    // Shared Document Rules
+    match /shared_documents/{sharedId} {
+      allow read: if isAdmin() || (isAuthenticated() && request.auth.token.email == resource.data.studentEmail);
+      allow create: if isAdmin() && isValidSharedDocument(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+  }
+}
