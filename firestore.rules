@@ -47,7 +47,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
       allow create: if isAuthenticated() && isOwner(userId);
-      allow update: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      allow update, delete: if isAuthenticated() && (isOwner(userId) || isAdmin());
     }
 
     // Document Rules

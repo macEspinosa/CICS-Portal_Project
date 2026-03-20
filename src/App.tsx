@@ -188,9 +188,52 @@ export default function App() {
   const [confirmDelete, setConfirmDelete] = useState<Document | null>(null);
   const [shareDoc, setShareDoc] = useState<Document | null>(null);
   const [shareStudent, setShareStudent] = useState<UserProfile | null>(null);
+  const [confirmAdminRemoval, setConfirmAdminRemoval] = useState<UserProfile | null>(null);
+  const [confirmPreAuthRemoval, setConfirmPreAuthRemoval] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const performAdminRemoval = async (admin: UserProfile | null) => {
+    if (!user || !admin) return;
+    setIsDeleting(true);
+    try {
+      // 1. Delete from users collection
+      await deleteDoc(doc(db, 'users', admin.uid));
+      
+      // 2. Also remove from pre-authorized admins to prevent automatic re-promotion on next login
+      await deleteDoc(doc(db, 'preAuthorizedAdmins', admin.email));
+      
+      // 3. Log the action
+      await addDoc(collection(db, 'logs'), {
+        userId: user.uid,
+        action: 'remove_admin',
+        targetEmail: admin.email,
+        timestamp: new Date().toISOString()
+      });
+      setToast({ message: "Administrator removed successfully", type: 'success' });
+      setConfirmAdminRemoval(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `users/${admin.uid}`);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const performPreAuthRemoval = async (email: string | null) => {
+    if (!user || !email) return;
+    setIsDeleting(true);
+    const path = `preAuthorizedAdmins/${email}`;
+    try {
+      await deleteDoc(doc(db, 'preAuthorizedAdmins', email));
+      setToast({ message: "Authorization removed successfully", type: 'success' });
+      setConfirmPreAuthRemoval(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, path);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Trigger ErrorBoundary if appError is set
   if (appError) throw appError;
@@ -239,6 +282,8 @@ export default function App() {
                 const newUser: UserProfile = {
                   uid: firebaseUser.uid,
                   email: firebaseUser.email!,
+                  displayName: firebaseUser.displayName || undefined,
+                  photoURL: firebaseUser.photoURL || undefined,
                   role: 'admin',
                   isBlocked: false,
                   lastLogin: new Date().toISOString()
@@ -333,7 +378,7 @@ export default function App() {
   const handleDownload = async (docObj: Document) => {
     if (!user) return;
     if (user.isBlocked) {
-      alert("Your account is restricted. You cannot download documents at this time.");
+      setToast({ message: "Your account is restricted. You cannot download documents at this time.", type: 'error' });
       return;
     }
 
@@ -593,8 +638,16 @@ export default function App() {
                 {view === 'dashboard' && <DashboardView user={user} setAppError={setAppError} handleDownload={handleDownload} handleDelete={(doc) => { setConfirmDelete(doc); return Promise.resolve(); }} onShare={(doc) => setShareDoc(doc)} />}
                 {view === 'documents' && <DocumentsView user={user} setAppError={setAppError} handleDownload={handleDownload} handleDelete={(doc) => { setConfirmDelete(doc); return Promise.resolve(); }} onShare={(doc) => setShareDoc(doc)} setToast={setToast} />}
                 {view === 'profile' && user.role === 'student' && <ProfileView user={user} setAppError={setAppError} setToast={setToast} />}
-                {view === 'users' && user.role === 'admin' && <UsersView currentUser={user} onShareStudent={(student) => setShareStudent(student)} />}
-                {view === 'settings' && user.role === 'admin' && <SettingsView user={user} setAppError={setAppError} />}
+                {view === 'users' && user.role === 'admin' && <UsersView currentUser={user} onShareStudent={(student) => setShareStudent(student)} setToast={setToast} />}
+                {view === 'settings' && user.role === 'admin' && (
+                  <SettingsView 
+                    user={user} 
+                    setAppError={setAppError} 
+                    setToast={setToast}
+                    setConfirmAdminRemoval={setConfirmAdminRemoval}
+                    setConfirmPreAuthRemoval={setConfirmPreAuthRemoval}
+                  />
+                )}
               </>
             )}
           </div>
@@ -653,6 +706,71 @@ export default function App() {
           </div>
         )}
 
+        {/* Admin Removal Confirmation Modal */}
+        {confirmAdminRemoval && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-8 border border-black/5">
+              <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center mb-6">
+                <ShieldAlert className="w-6 h-6 text-red-600" />
+              </div>
+              <h3 className="text-xl font-bold text-stone-900 mb-2">Remove Administrator?</h3>
+              <p className="text-stone-500 mb-8">
+                Are you sure you want to remove <span className="font-semibold text-stone-900">{confirmAdminRemoval.displayName || confirmAdminRemoval.email}</span> as an administrator? 
+                This will delete their user profile and revoke their admin access.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setConfirmAdminRemoval(null)}
+                  disabled={isDeleting}
+                  className="flex-1 py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-600 rounded-xl font-medium transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => performAdminRemoval(confirmAdminRemoval)}
+                  disabled={isDeleting}
+                  className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  {isDeleting ? "Removing..." : "Remove"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Pre-auth Removal Confirmation Modal */}
+        {confirmPreAuthRemoval && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-8 border border-black/5">
+              <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center mb-6">
+                <ShieldAlert className="w-6 h-6 text-red-600" />
+              </div>
+              <h3 className="text-xl font-bold text-stone-900 mb-2">Remove Authorization?</h3>
+              <p className="text-stone-500 mb-8">
+                Are you sure you want to remove authorization for <span className="font-semibold text-stone-900">{confirmPreAuthRemoval}</span>?
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setConfirmPreAuthRemoval(null)}
+                  disabled={isDeleting}
+                  className="flex-1 py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-600 rounded-xl font-medium transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => performPreAuthRemoval(confirmPreAuthRemoval)}
+                  disabled={isDeleting}
+                  className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  {isDeleting ? "Removing..." : "Remove"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Toast Notification */}
         {toast && (
           <div className="fixed bottom-8 right-8 z-50 animate-in fade-in slide-in-from-bottom-4">
@@ -703,6 +821,8 @@ function UserSetup({ firebaseUser, onComplete }: { firebaseUser: any, onComplete
       const newUser: UserProfile = {
         uid: firebaseUser.uid,
         email: firebaseUser.email!,
+        displayName: firebaseUser.displayName || undefined,
+        photoURL: firebaseUser.photoURL || undefined,
         role: 'student',
         program,
         isBlocked: false,
@@ -1279,7 +1399,7 @@ function DocumentsView({ user, setAppError, handleDownload, handleDelete, onShar
       setUploadProgress(100);
     } catch (err: any) {
       console.error("Upload error:", err);
-      alert(err.message || "Failed to upload document.");
+      setToast({ message: err.message || "Failed to upload document.", type: 'error' });
       setIsUploadingToStorage(false);
     }
   };
@@ -2026,7 +2146,7 @@ function ProfileView({ user, setAppError, setToast }: { user: UserProfile, setAp
   );
 }
 
-function UsersView({ currentUser, onShareStudent }: { currentUser: UserProfile, onShareStudent: (student: UserProfile) => void }) {
+function UsersView({ currentUser, onShareStudent, setToast }: { currentUser: UserProfile, onShareStudent: (student: UserProfile) => void, setToast: (t: any) => void }) {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<Error | null>(null);
@@ -2050,8 +2170,9 @@ function UsersView({ currentUser, onShareStudent }: { currentUser: UserProfile, 
       await updateDoc(doc(db, 'users', user.uid), {
         isBlocked: !user.isBlocked
       });
+      setToast({ message: `Student ${user.isBlocked ? 'unblocked' : 'blocked'} successfully`, type: 'success' });
     } catch (err) {
-      console.error(err);
+      handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
     }
   };
 
@@ -2093,11 +2214,15 @@ function UsersView({ currentUser, onShareStudent }: { currentUser: UserProfile, 
                 <tr key={u.uid} className="hover:bg-stone-50/50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-stone-100 rounded-full flex items-center justify-center text-xs font-bold text-stone-600">
-                        {(u.name || u.email)[0].toUpperCase()}
+                      <div className="w-8 h-8 bg-stone-100 rounded-full flex items-center justify-center text-xs font-bold text-stone-600 overflow-hidden">
+                        {u.photoURL ? (
+                          <img src={u.photoURL} alt={u.displayName || u.name || u.email} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        ) : (
+                          (u.displayName || u.name || u.email)[0].toUpperCase()
+                        )}
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-sm font-medium text-stone-900">{u.name || 'No name set'}</span>
+                        <span className="text-sm font-medium text-stone-900">{u.name || u.displayName || 'No name set'}</span>
                         <span className="text-xs text-stone-400">{u.email}</span>
                       </div>
                     </div>
@@ -2155,7 +2280,19 @@ function UsersView({ currentUser, onShareStudent }: { currentUser: UserProfile, 
   );
 }
 
-function SettingsView({ user, setAppError }: { user: UserProfile, setAppError: (err: Error) => void }) {
+function SettingsView({ 
+  user, 
+  setAppError, 
+  setToast,
+  setConfirmAdminRemoval,
+  setConfirmPreAuthRemoval
+}: { 
+  user: UserProfile, 
+  setAppError: (err: Error) => void,
+  setToast: (toast: { message: string, type: 'success' | 'error' } | null) => void,
+  setConfirmAdminRemoval: (admin: UserProfile | null) => void,
+  setConfirmPreAuthRemoval: (email: string | null) => void
+}) {
   const [preAuthAdmins, setPreAuthAdmins] = useState<PreAuthorizedAdmin[]>([]);
   const [activeAdmins, setActiveAdmins] = useState<UserProfile[]>([]);
   const [newEmail, setNewEmail] = useState("");
@@ -2184,7 +2321,7 @@ function SettingsView({ user, setAppError }: { user: UserProfile, setAppError: (
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEmail || !newEmail.endsWith(`@${ALLOWED_DOMAIN}`)) {
-      alert(`Email must end with @${ALLOWED_DOMAIN}`);
+      setToast({ message: `Email must end with @${ALLOWED_DOMAIN}`, type: 'error' });
       return;
     }
 
@@ -2196,36 +2333,46 @@ function SettingsView({ user, setAppError }: { user: UserProfile, setAppError: (
         createdAt: new Date().toISOString()
       });
       setNewEmail("");
+      setToast({ message: "Email authorized successfully", type: 'success' });
     } catch (err) {
       console.error(err);
+      setToast({ message: "Failed to authorize email", type: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRemove = async (email: string) => {
+  const handleRemove = (email: string) => {
     if (email === ADMIN_EMAIL) return;
-    if (!confirm(`Are you sure you want to remove authorization for ${email}?`)) return;
-    
-    try {
-      await deleteDoc(doc(db, 'preAuthorizedAdmins', email));
-    } catch (err) {
-      console.error(err);
-    }
+    setConfirmPreAuthRemoval(email);
   };
 
   const toggleBlock = async (admin: UserProfile) => {
     if (admin.uid === user.uid) {
-      alert("You cannot block your own account.");
+      setToast({ message: "You cannot block your own account.", type: 'error' });
       return;
     }
     try {
       await updateDoc(doc(db, 'users', admin.uid), {
         isBlocked: !admin.isBlocked
       });
+      setToast({ message: `Administrator ${admin.isBlocked ? 'unblocked' : 'blocked'} successfully`, type: 'success' });
     } catch (err) {
-      console.error(err);
+      handleFirestoreError(err, OperationType.UPDATE, `users/${admin.uid}`);
     }
+  };
+
+  const handleDeleteAdmin = (admin: UserProfile) => {
+    if (admin.uid === user.uid) {
+      setToast({ message: "You cannot remove your own administrative account.", type: 'error' });
+      return;
+    }
+    if (admin.email === ADMIN_EMAIL) {
+      setToast({ message: "The primary administrator account cannot be removed.", type: 'error' });
+      return;
+    }
+    
+    setConfirmAdminRemoval(admin);
   };
 
   return (
@@ -2260,22 +2407,35 @@ function SettingsView({ user, setAppError }: { user: UserProfile, setAppError: (
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {admin.uid !== user.uid && (
-                    <button
-                      onClick={() => toggleBlock(admin)}
-                      className={cn(
-                        "px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
-                        admin.isBlocked
-                          ? "bg-red-50 text-red-600 hover:bg-red-100"
-                          : "bg-stone-50 text-stone-600 hover:bg-stone-100"
-                      )}
-                    >
-                      {admin.isBlocked ? "Unblock" : "Block"}
-                    </button>
+                  {admin.uid !== user.uid && admin.email !== ADMIN_EMAIL && (
+                    <>
+                      <button
+                        onClick={() => toggleBlock(admin)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                          admin.isBlocked
+                            ? "bg-red-50 text-red-600 hover:bg-red-100"
+                            : "bg-stone-50 text-stone-600 hover:bg-stone-100"
+                        )}
+                      >
+                        {admin.isBlocked ? "Unblock" : "Block"}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteAdmin(admin)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-stone-50 text-stone-600 hover:bg-red-50 hover:text-red-600 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </>
                   )}
                   {admin.isBlocked && (
                     <span className="px-2 py-1 bg-red-100 text-red-700 text-[10px] font-bold uppercase rounded tracking-wider">
                       Blocked
+                    </span>
+                  )}
+                  {admin.email === ADMIN_EMAIL && (
+                    <span className="px-2 py-1 bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase rounded tracking-wider">
+                      Primary Admin
                     </span>
                   )}
                 </div>
@@ -2334,10 +2494,9 @@ function SettingsView({ user, setAppError }: { user: UserProfile, setAppError: (
                 {admin.email !== ADMIN_EMAIL && (
                   <button 
                     onClick={() => handleRemove(admin.email)}
-                    className="p-2 text-stone-300 hover:text-red-500 transition-colors"
-                    title="Remove authorization"
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-stone-50 text-stone-600 hover:bg-red-50 hover:text-red-600 transition-colors"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    Remove
                   </button>
                 )}
               </div>
