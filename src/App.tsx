@@ -199,7 +199,9 @@ export default function App() {
 
     const authUnsub = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        console.log("User logged in:", firebaseUser.email);
         if (!firebaseUser.email?.endsWith(`@${ALLOWED_DOMAIN}`)) {
+          console.warn("Invalid email domain:", firebaseUser.email);
           setError(`Only ${ALLOWED_DOMAIN} emails are allowed.`);
           await signOut(auth);
           setLoading(false);
@@ -208,9 +210,12 @@ export default function App() {
 
         // Set up real-time listener for user profile
         profileUnsub = onSnapshot(doc(db, 'users', firebaseUser.uid), async (snapshot) => {
+          console.log("Profile snapshot exists:", snapshot.exists());
           if (snapshot.exists()) {
             const userData = snapshot.data() as UserProfile;
+            console.log("User data:", userData);
             if (userData.isBlocked) {
+              console.warn("User is blocked:", firebaseUser.email);
               setError("Your account has been blocked. Please contact an administrator.");
               setUser(null);
               await signOut(auth);
@@ -220,13 +225,16 @@ export default function App() {
             }
             setLoading(false);
           } else {
+            console.log("Checking pre-auth for:", firebaseUser.email);
             // New user logic
             try {
               const preAuthDoc = await getDoc(doc(db, 'preAuthorizedAdmins', firebaseUser.email!));
               const isPreAuthAdmin = preAuthDoc.exists();
               const isInitialAdmin = firebaseUser.email === ADMIN_EMAIL;
+              console.log("Is pre-auth admin:", isPreAuthAdmin, "Is initial admin:", isInitialAdmin);
               
               if (isInitialAdmin || isPreAuthAdmin) {
+                console.log("Creating admin profile...");
                 const newUser: UserProfile = {
                   uid: firebaseUser.uid,
                   email: firebaseUser.email!,
@@ -242,12 +250,15 @@ export default function App() {
                   timestamp: new Date().toISOString()
                 });
               } else {
+                console.log("User needs setup:", firebaseUser.email);
                 // Regular students need to go through setup
                 setNeedsSetup(firebaseUser);
                 setLoading(false);
               }
             } catch (err) {
               console.error("Error checking pre-auth status:", err);
+              // If we can't check admin status, default to student setup
+              setNeedsSetup(firebaseUser);
               setLoading(false);
             }
           }
@@ -258,6 +269,7 @@ export default function App() {
         });
 
       } else {
+        console.log("No user logged in");
         setUser(null);
         setNeedsSetup(null);
         if (profileUnsub) profileUnsub();

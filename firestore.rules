@@ -65,7 +65,8 @@ service cloud.firestore {
 
     // Pre-authorized Admin Rules
     match /preAuthorizedAdmins/{email} {
-      allow read, write: if isAdmin();
+      allow read: if isAuthenticated() && (request.auth.token.email == email || isAdmin());
+      allow write: if isAdmin();
     }
 
     // Shared Document Rules
