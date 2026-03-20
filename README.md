@@ -1,20 +1,16 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# CICS Document Portal
 
-# Run and deploy your AI Studio app
+A document management system for the College of Information and Computing Sciences (CICS) that enables administrators to distribute documents to students individually or in bulk using institutional email addresses (`@neu.edu.ph`).
 
-This contains everything you need to run your app locally.
+**Live App:** [cics-portal-project.vercel.app](https://cics-portal-project.vercel.app)
 
-View your app in AI Studio: https://ai.studio/apps/012ec924-765c-4730-907d-aadddb8afb0c
+---
 
-## Run Locally
+## Features
 
-**Prerequisites:**  Node.js
+- **Google Sign-In** – Secure authentication restricted to `@neu.edu.ph` accounts
+- **Document Distribution** – Send documents individually or in bulk (CSV upload)
+- **Schedule Delivery** – Set future dates for document distribution
+- **Activity Tracking** – Monitor login trends and document access analytics
+- **Delivery History** – Complete log of all distributions with status tracking
 
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
