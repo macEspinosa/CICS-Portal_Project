@@ -193,6 +193,7 @@ export default function App() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const lastLoginUpdated = React.useRef(false);
 
   const performAdminRemoval = async (admin: UserProfile | null) => {
     if (!user || !admin) return;
@@ -265,7 +266,18 @@ export default function App() {
               await signOut(auth);
             } else {
               setUser(userData);
+              if (userData.role === 'student' && view === 'dashboard') {
+                setView('documents');
+              }
               setError(null);
+
+              // Update lastLogin once per session
+              if (!lastLoginUpdated.current) {
+                lastLoginUpdated.current = true;
+                updateDoc(doc(db, 'users', firebaseUser.uid), {
+                  lastLogin: new Date().toISOString()
+                }).catch(err => console.error("Error updating lastLogin:", err));
+              }
             }
             setLoading(false);
           } else {
@@ -508,12 +520,14 @@ export default function App() {
             </div>
             
             <nav className="space-y-1">
-              <NavItem 
-                active={view === 'dashboard'} 
-                onClick={() => { setView('dashboard'); setMobileMenuOpen(false); }} 
-                icon={<LayoutDashboard className="w-5 h-5" />} 
-                label="Dashboard" 
-              />
+              {user.role === 'admin' && (
+                <NavItem 
+                  active={view === 'dashboard'} 
+                  onClick={() => { setView('dashboard'); setMobileMenuOpen(false); }} 
+                  icon={<LayoutDashboard className="w-5 h-5" />} 
+                  label="Dashboard" 
+                />
+              )}
               <NavItem 
                 active={view === 'documents'} 
                 onClick={() => { setView('documents'); setMobileMenuOpen(false); }} 
@@ -534,7 +548,7 @@ export default function App() {
                     active={view === 'users'} 
                     onClick={() => { setView('users'); setMobileMenuOpen(false); }} 
                     icon={<Users className="w-5 h-5" />} 
-                    label="Students" 
+                    label="Users" 
                   />
                   <NavItem 
                     active={view === 'settings'} 
@@ -635,9 +649,9 @@ export default function App() {
               />
             ) : (
               <>
-                {view === 'dashboard' && <DashboardView user={user} setAppError={setAppError} handleDownload={handleDownload} handleDelete={(doc) => { setConfirmDelete(doc); return Promise.resolve(); }} onShare={(doc) => setShareDoc(doc)} />}
+                {view === 'dashboard' && user.role === 'admin' && <DashboardView user={user} setAppError={setAppError} handleDownload={handleDownload} handleDelete={(doc) => { setConfirmDelete(doc); return Promise.resolve(); }} onShare={(doc) => setShareDoc(doc)} />}
                 {view === 'documents' && <DocumentsView user={user} setAppError={setAppError} handleDownload={handleDownload} handleDelete={(doc) => { setConfirmDelete(doc); return Promise.resolve(); }} onShare={(doc) => setShareDoc(doc)} setToast={setToast} />}
-                {view === 'profile' && user.role === 'student' && <ProfileView user={user} setAppError={setAppError} setToast={setToast} />}
+                {view === 'profile' && <ProfileView user={user} setAppError={setAppError} setToast={setToast} />}
                 {view === 'users' && user.role === 'admin' && <UsersView currentUser={user} onShareStudent={(student) => setShareStudent(student)} setToast={setToast} />}
                 {view === 'settings' && user.role === 'admin' && (
                   <SettingsView 
@@ -809,22 +823,26 @@ function NavItem({ active, onClick, icon, label }: { active: boolean, onClick: (
 }
 
 function UserSetup({ firebaseUser, onComplete }: { firebaseUser: any, onComplete: () => void }) {
+  const [name, setName] = useState(firebaseUser.displayName || "");
   const [program, setProgram] = useState("");
+  const [yearLevel, setYearLevel] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!program) return;
+    if (!name || !program || !yearLevel) return;
 
     setLoading(true);
     try {
       const newUser: UserProfile = {
         uid: firebaseUser.uid,
         email: firebaseUser.email!,
+        name: name,
         displayName: firebaseUser.displayName || undefined,
         photoURL: firebaseUser.photoURL || undefined,
         role: 'student',
         program,
+        yearLevel,
         isBlocked: false,
         lastLogin: new Date().toISOString()
       };
@@ -857,9 +875,21 @@ function UserSetup({ firebaseUser, onComplete }: { firebaseUser: any, onComplete
           />
         </div>
         <h1 className="text-2xl font-bold text-stone-900 mb-2">Account Setup</h1>
-        <p className="text-stone-500 mb-8">Please select your undergraduate program to complete your profile.</p>
+        <p className="text-stone-500 mb-8">Please complete your profile to access the portal.</p>
         
         <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-stone-700">Full Name</label>
+            <input
+              required
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Enter your full name"
+              className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all outline-none"
+            />
+          </div>
+
           <div className="space-y-2">
             <label className="text-sm font-medium text-stone-700">Undergraduate Program</label>
             <select
@@ -873,9 +903,22 @@ function UserSetup({ firebaseUser, onComplete }: { firebaseUser: any, onComplete
             </select>
           </div>
 
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-stone-700">Year Level</label>
+            <select
+              required
+              value={yearLevel}
+              onChange={(e) => setYearLevel(e.target.value)}
+              className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all outline-none"
+            >
+              <option value="">Select year level...</option>
+              {YEAR_LEVELS.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+
           <button
             type="submit"
-            disabled={!program || loading}
+            disabled={!name || !program || !yearLevel || loading}
             className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
           >
             {loading && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -897,7 +940,7 @@ function DashboardView({ user, setAppError, handleDownload, handleDelete, onShar
 
   useEffect(() => {
     if (user.role !== 'admin') return;
-    const q = query(collection(db, 'users'), where('role', '==', 'student'));
+    const q = query(collection(db, 'users'));
     const unsub = onSnapshot(q, (snapshot) => {
       setUsers(snapshot.docs.map(d => d.data() as UserProfile));
     }, (error) => {
@@ -1005,7 +1048,7 @@ function DashboardView({ user, setAppError, handleDownload, handleDelete, onShar
         />
         <StatCard 
           icon={<GraduationCap className="w-6 h-6 text-blue-600" />} 
-          label={user.role === 'admin' ? "Total Students" : "My Program"} 
+          label={user.role === 'admin' ? "Total Users" : "My Program"} 
           value={user.role === 'admin' ? users.length.toString() : (user.program || "Not Set")} 
         />
         <StatCard 
@@ -1436,23 +1479,9 @@ function DocumentsView({ user, setAppError, handleDownload, handleDelete, onShar
           {user.role === 'student' && (
             <div className="flex bg-white border border-stone-200 rounded-xl p-1 flex-1 sm:flex-none">
               <button
-                onClick={() => setActiveTab('all')}
-                className={cn(
-                  "flex-1 sm:flex-none px-4 py-1.5 text-[10px] md:text-xs font-medium rounded-lg transition-all whitespace-nowrap",
-                  activeTab === 'all' ? "bg-stone-900 text-white shadow-sm" : "text-stone-500 hover:text-stone-900"
-                )}
+                className="flex-1 sm:flex-none px-4 py-1.5 text-[10px] md:text-xs font-medium rounded-lg bg-stone-900 text-white shadow-sm whitespace-nowrap"
               >
                 All Documents
-              </button>
-              <button
-                onClick={() => setActiveTab('shared')}
-                className={cn(
-                  "flex-1 sm:flex-none px-4 py-1.5 text-[10px] md:text-xs font-medium rounded-lg transition-all flex items-center justify-center gap-2 whitespace-nowrap",
-                  activeTab === 'shared' ? "bg-stone-900 text-white shadow-sm" : "text-stone-500 hover:text-stone-900"
-                )}
-              >
-                <Send className="w-3 h-3" />
-                Shared
               </button>
             </div>
           )}
@@ -2070,15 +2099,46 @@ function StudentShareModal({ student, user, onClose, setToast }: { student: User
 }
 
 function ProfileView({ user, setAppError, setToast }: { user: UserProfile, setAppError: (err: Error) => void, setToast: (toast: { message: string, type: 'success' | 'error' } | null) => void }) {
+  const [name, setName] = useState(user.name || user.displayName || "");
   const [program, setProgram] = useState(user.program || "");
+  const [yearLevel, setYearLevel] = useState(user.yearLevel || "");
+  const [photoURL, setPhotoURL] = useState(user.photoURL || "");
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setUploading(true);
+      try {
+        const storageRef = ref(storage, `profiles/${user.uid}/${file.name}`);
+        const uploadTask = uploadBytesResumable(storageRef, file);
+        
+        await new Promise((resolve, reject) => {
+          uploadTask.on('state_changed', null, reject, () => resolve(null));
+        });
+
+        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+        setPhotoURL(downloadURL);
+        setToast({ message: "Photo uploaded! Don't forget to save changes.", type: 'success' });
+      } catch (err) {
+        console.error("Error uploading photo:", err);
+        setToast({ message: "Failed to upload photo.", type: 'error' });
+      } finally {
+        setUploading(false);
+      }
+    }
+  };
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       await updateDoc(doc(db, 'users', user.uid), {
-        program
+        name,
+        program,
+        yearLevel,
+        photoURL
       });
       setToast({ message: "Profile updated successfully!", type: 'success' });
     } catch (err: any) {
@@ -2093,35 +2153,83 @@ function ProfileView({ user, setAppError, setToast }: { user: UserProfile, setAp
     <div className="max-w-2xl mx-auto space-y-8">
       <div className="bg-white rounded-2xl border border-black/5 p-8">
         <h3 className="text-xl font-bold text-stone-900 mb-6">My Profile</h3>
+        
+        <div className="flex flex-col items-center mb-8">
+          <div className="relative group">
+            <div className="w-24 h-24 bg-stone-100 rounded-full flex items-center justify-center text-stone-400 font-bold text-2xl overflow-hidden border-2 border-stone-50">
+              {photoURL ? (
+                <img src={photoURL} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              ) : (
+                (name || user.email)[0].toUpperCase()
+              )}
+            </div>
+            <label className="absolute inset-0 flex items-center justify-center bg-black/40 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+              <Upload className="w-6 h-6" />
+              <input type="file" className="hidden" accept="image/*" onChange={handlePhotoUpload} disabled={uploading} />
+            </label>
+            {uploading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-white/60 rounded-full">
+                <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+              </div>
+            )}
+          </div>
+          <p className="text-xs text-stone-400 mt-2">Click to change profile picture</p>
+        </div>
+
         <form onSubmit={handleUpdateProfile} className="space-y-6">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">Email Address</label>
-            <input
-              type="email"
-              value={user.email}
-              disabled
-              className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl text-stone-400 cursor-not-allowed outline-none"
-            />
-            <p className="text-xs text-stone-400">Email is managed by your Google account.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-stone-700">Full Name</label>
+              <input
+                required
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full p-3 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-stone-700">Email Address</label>
+              <input
+                type="email"
+                value={user.email}
+                disabled
+                className="w-full p-3 bg-stone-50 border border-stone-200 rounded-xl text-stone-400 cursor-not-allowed outline-none"
+              />
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">Undergraduate Program</label>
-            <select
-              required
-              value={program}
-              onChange={(e) => setProgram(e.target.value)}
-              className="w-full p-3 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-            >
-              <option value="">Select a program...</option>
-              {PROGRAMS.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-stone-700">Undergraduate Program</label>
+              <select
+                required
+                value={program}
+                onChange={(e) => setProgram(e.target.value)}
+                className="w-full p-3 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+              >
+                <option value="">Select a program...</option>
+                {PROGRAMS.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-stone-700">Year Level</label>
+              <select
+                required
+                value={yearLevel}
+                onChange={(e) => setYearLevel(e.target.value)}
+                className="w-full p-3 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+              >
+                <option value="">Select year level...</option>
+                {YEAR_LEVELS.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
           </div>
 
           <div className="pt-4">
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || uploading}
               className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -2155,8 +2263,8 @@ function UsersView({ currentUser, onShareStudent, setToast }: { currentUser: Use
 
   useEffect(() => {
     if (currentUser.role !== 'admin') return;
-    // Only fetch students for the "Students" view
-    const q = query(collection(db, 'users'), where('role', '==', 'student'));
+    // Fetch all users (admins and students)
+    const q = query(collection(db, 'users'));
     const unsub = onSnapshot(q, (snapshot) => {
       setUsers(snapshot.docs.map(d => d.data() as UserProfile));
     }, (err) => {
@@ -2170,7 +2278,7 @@ function UsersView({ currentUser, onShareStudent, setToast }: { currentUser: Use
       await updateDoc(doc(db, 'users', user.uid), {
         isBlocked: !user.isBlocked
       });
-      setToast({ message: `Student ${user.isBlocked ? 'unblocked' : 'blocked'} successfully`, type: 'success' });
+      setToast({ message: `User ${user.isBlocked ? 'unblocked' : 'blocked'} successfully`, type: 'success' });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
     }
@@ -2189,7 +2297,7 @@ function UsersView({ currentUser, onShareStudent, setToast }: { currentUser: Use
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400" />
           <input
             type="text"
-            placeholder="Search students by name or email..."
+            placeholder="Search users by name or email..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 bg-white border border-stone-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
@@ -2199,12 +2307,13 @@ function UsersView({ currentUser, onShareStudent, setToast }: { currentUser: Use
 
       <div className="bg-white rounded-2xl border border-black/5 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[600px]">
+          <table className="w-full text-left border-collapse min-w-[800px]">
             <thead>
               <tr className="bg-stone-50 border-b border-black/5">
                 <th className="px-6 py-4 text-xs font-semibold text-stone-500 uppercase tracking-wider">User</th>
                 <th className="px-6 py-4 text-xs font-semibold text-stone-500 uppercase tracking-wider">Role</th>
                 <th className="px-6 py-4 text-xs font-semibold text-stone-500 uppercase tracking-wider">Program / Info</th>
+                <th className="px-6 py-4 text-xs font-semibold text-stone-500 uppercase tracking-wider">Last Login</th>
                 <th className="px-6 py-4 text-xs font-semibold text-stone-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-4 text-xs font-semibold text-stone-500 uppercase tracking-wider text-right">Actions</th>
               </tr>
@@ -2228,13 +2337,21 @@ function UsersView({ currentUser, onShareStudent, setToast }: { currentUser: Use
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider bg-blue-50 text-blue-600">
-                      Student
+                    <span className={cn(
+                      "inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider",
+                      u.role === 'admin' ? "bg-purple-50 text-purple-600" : "bg-blue-50 text-blue-600"
+                    )}>
+                      {u.role}
                     </span>
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-sm text-stone-500">
-                      {u.program || 'No program'}
+                      {u.program || (u.role === 'admin' ? 'Administrator' : 'No program')}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="text-xs text-stone-500">
+                      {u.lastLogin ? format(parseISO(u.lastLogin), 'MMM d, yyyy HH:mm') : 'Never'}
                     </span>
                   </td>
                   <td className="px-6 py-4">
@@ -2250,13 +2367,15 @@ function UsersView({ currentUser, onShareStudent, setToast }: { currentUser: Use
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-3">
-                      <button
-                        onClick={() => onShareStudent(u)}
-                        className="p-2 text-stone-400 hover:text-blue-600 transition-colors"
-                        title="Give Document"
-                      >
-                        <Send className="w-4 h-4" />
-                      </button>
+                      {u.role === 'student' && (
+                        <button
+                          onClick={() => onShareStudent(u)}
+                          className="p-2 text-stone-400 hover:text-blue-600 transition-colors"
+                          title="Give Document"
+                        >
+                          <Send className="w-4 h-4" />
+                        </button>
+                      )}
                       {u.uid !== currentUser.uid && (
                         <button
                           onClick={() => toggleBlock(u)}
